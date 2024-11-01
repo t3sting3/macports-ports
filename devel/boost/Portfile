@@ -32,8 +32,7 @@ checksums       rmd160  695537a00f6f9ae80e4d682b155ce097017c49a9 \
 depends_lib     port:zlib \
                 port:expat \
                 port:bzip2 \
-                port:libiconv \
-                port:icu
+                port:libiconv
 
 post-extract {
     fs-traverse dir ${workpath} {
