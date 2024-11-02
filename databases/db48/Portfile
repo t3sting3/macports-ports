@@ -1,37 +1,39 @@
 
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
-# $Id$
 
-PortSystem 1.0
-PortGroup  muniversal 1.0
-PortGroup  select 1.0
+PortSystem      1.0
+PortGroup       muniversal 1.0
 
-name            db48
-version         4.8.30
-revision        3
-set branch      [join [lrange [split ${version} .] 0 1] {}]
+name            db53
+# Increase the revision of p5-berkeleydb any time the db53 version changes.
+# See https://trac.macports.org/ticket/56561
+version         5.3.28
+revision        0
+
 categories      databases
 license         Sleepycat
-maintainers     jmr openmaintainer
-platforms       darwin
-description     The Berkeley DB package, version 4.8
+maintainers     nomaintainer
+supported_archs ppc ppc64 i386 x86_64
+
+description     The Berkeley DB package, version 5.3
 long_description \
-    Version 4.8 of the Berkeley Data Base library which \
+    Version 5.3 of the Berkeley Data Base library which \
     offers (key/value) storage with optional concurrent \
     access or transactions interface.  This port will \
     install the AES (American Encryption Standard) \
     enabled version.
-
 homepage        http://www.oracle.com/us/products/database/berkeley-db/db/overview/index.html
-master_sites    http://download.oracle.com/berkeley-db/
 
+set branch      [join [lrange [split ${version} .] 0 1] {}]
+master_sites    http://download.oracle.com/berkeley-db/
 distname        db-${version}
 
-checksums       md5     f80022099c5742cd179343556179aa8c \
-                sha1    ab36c170dda5b2ceaad3915ced96e41c6b7e493c \
-                rmd160  dd2fcd4c9b857a91e2f491fd4fadb0c51b993a9c
+checksums       rmd160  a4898908ef6dccb137df02e43843f7d3cfab6a3c \
+                sha256  e0a992d740709892e81f9d93f06daf305cf73fb81b545afe72478043172c3628 \
+                size    35090431
 
-patchfiles      patch-dbinc_atomic.h
+patchfiles      patch-src_dbinc_atomic.h \
+                configure.patch
 
 configure.dir   ${worksrcpath}/build_unix
 build.dir       ${configure.dir}
@@ -41,16 +43,11 @@ configure.args  --enable-cxx \
                 --includedir=\\\${prefix}/include/db${branch} \
                 --libdir=\\\${prefix}/lib/db${branch}
 
-# TODO: Simplify once MacPorts 2.3 is released
 set cxx_stdlibflags {}
-if {[info exists configure.cxx_stdlib] && ${configure.cxx_stdlib} ne {} && [string match *clang* ${configure.cxx}]} {
+if {[string match *clang* ${configure.cxx}] && ${configure.cxx_stdlib} ne ""} {
     set cxx_stdlibflags -stdlib=${configure.cxx_stdlib}
 }
 configure.cxx ${configure.cxx} ${cxx_stdlibflags}
-
-depends_run-append  port:db_select
-select.group        db
-select.file         ${filespath}/db48
 
 destroot.destdir \
     prefix=${destroot}${prefix} \
@@ -62,25 +59,57 @@ post-destroot {
         move ${destroot}${prefix}/bin/${bin} \
             ${destroot}${prefix}/bin/${newbin}
     }
+    if { [variant_isset sql] } {
+        move ${destroot}${prefix}/bin/dbsql \
+            ${destroot}${prefix}/bin/db${branch}sql
+    }
 }
 
-variant java conflicts no_java description {Build the Java API} {
+variant java description {Build the Java API} {
     configure.args-append   --enable-java
+    platform macosx {
+        pre-configure {
+            if {![file isfile "/System/Library/Frameworks/JavaVM.framework/Headers/jni.h"]} {
+                ui_error "${name} requires the Java for Mac OS X development headers."
+                if {${os.major} == 10} {
+                    ui_error "Download the Java Developer Package from: <https://connect.apple.com/cgi-bin/WebObjects/MemberSite.woa/wa/getSoftware?bundleID=20719>"
+                } elseif {${os.major} == 9} {
+                    ui_error "Download the Java Developer Package from: <https://connect.apple.com/cgi-bin/WebObjects/MemberSite.woa/wa/getSoftware?bundleID=20720>"
+                } else {
+                    ui_error "Make sure your Xcode installation is complete."
+                }
+                return -code error "missing Java headers"
+            }
+        }
+    }
 }
 
-variant no_java conflicts java description {Legacy compatibility variant} {}
-if {[variant_isset no_java]} {
-    default_variants -java
-} elseif {${os.subplatform} eq "macosx" && ${os.major} < 11} {
+if {${os.subplatform} eq "macosx" && ${os.major} < 11} {
     default_variants +java
 }
 
-variant tcl description {build Tcl API} {
+variant sql description {Build the SQL API} {
+    patchfiles-append       patch-sqlite.diff
+    configure.args-append   --enable-sql
+# build with -DSQLITE_ENABLE_COLUMN_METADATA
+# required by libgda5 to enable Berkeley DB SQL support
+    configure.cppflags-append -DSQLITE_ENABLE_COLUMN_METADATA
+}
+default_variants +sql
+
+variant tcl description {Build Tcl API} {
     depends_lib-append      port:tcl
     configure.args-append   --enable-tcl --with-tcl=${prefix}/lib
 }
 
-if { [variant_isset universal] } {
+variant umrw description {Mask harmless uninitialized memory read/writes for the benefit of memory debuggers such as Valgrind} {
+    configure.args-append --enable-umrw
+}
+
+if {${universal_possible} && [variant_isset universal]} {
+    # configure fails with aarch64 but it seems to work fine with arm
+    set merger_host(arm64) arm-apple-${os.platform}${os.version}
+
     if {${os.arch} eq "i386"} {
         if { ${os.major} >= 10 } {
             set merger_configure_args(ppc) --with-mutex=Darwin/_spin_lock_try
@@ -92,6 +121,4 @@ if { [variant_isset universal] } {
     }
 }
 
-livecheck.type  regex
-livecheck.url   http://www.oracle.com/technetwork/database/berkeleydb/downloads/index-082944.html
-livecheck.regex {(4\.8(?:\.\d+)*)\.tar\.gz}
+livecheck.type  none
